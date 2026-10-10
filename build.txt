@@ -1,0 +1,1 @@
+pyinstaller --onefile --noconsole --icon=icon.ico --name QuadroHaas --optimize 2 --strip --exclude-module tkinter.test --exclude-module unittest --exclude-module test --exclude-module pydoc --exclude-module doctest --add-data "icon.ico;." main.py
