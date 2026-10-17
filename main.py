@@ -10,8 +10,8 @@ MAX_DELAY_SAMPLES = 44100
 ICON_PATH = "icon.ico"
 TICK_PATH = "tick.wav"
 OST_PATH = "coconutmall.mp3"
-ENGINE_VER = "v1.2"
-NON_COMPATIBLE_VERS = ["v1.0", "v1.1", None]
+ENGINE_VER = "v1.3"
+NON_COMPATIBLE_VERS = ["v1.1", "v1.2", None]
 ECHO_DELAY_MS = 200
 ECHO_FEEDBACK = 0.4
 TICK_INTERVAL = 0.5
@@ -30,8 +30,6 @@ reverb_amount = 0.0
 echo_amount = 0.0
 device1_delay_ms = 0.0
 device2_delay_ms = 0.0
-device1_offset_ms = 0.0
-device2_offset_ms = 0.0
 
 queue_dev1 = queue.Queue(maxsize=4)
 queue_dev2 = queue.Queue(maxsize=4)
@@ -68,44 +66,53 @@ def audio_input_callback(indata, frames, time_info, status):
     global pointer_device1, pointer_device2, pointer_reverb, pointer_echo
     if not is_engine_active:
         return
+
     processed_input = indata.copy()
 
-    reverb_delay_samples = int(0.08 * SAMPLE_RATE)
-    indices_rev = (
-        np.arange(pointer_reverb - reverb_delay_samples, pointer_reverb - reverb_delay_samples + frames)
-        % MAX_DELAY_SAMPLES
-    )
-    delayed_signal = buffer_reverb[indices_rev]
-    processed_input += delayed_signal * reverb_amount
-    write_indices_rev = np.arange(pointer_reverb, pointer_reverb + frames) % MAX_DELAY_SAMPLES
-    buffer_reverb[write_indices_rev] = processed_input + delayed_signal * (reverb_amount * 0.5)
-    pointer_reverb = (pointer_reverb + frames) % MAX_DELAY_SAMPLES
+    if reverb_amount > 0:
+        reverb_delay_samples = int(0.08 * SAMPLE_RATE)
+        indices_rev = (np.arange(pointer_reverb - reverb_delay_samples, pointer_reverb - reverb_delay_samples + frames) % MAX_DELAY_SAMPLES)
+        delayed_signal = buffer_reverb[indices_rev]
+        processed_input += delayed_signal * reverb_amount
+        write_indices_rev = np.arange(pointer_reverb, pointer_reverb + frames) % MAX_DELAY_SAMPLES
+        buffer_reverb[write_indices_rev] = processed_input + delayed_signal * (reverb_amount * 0.5)
+        pointer_reverb = (pointer_reverb + frames) % MAX_DELAY_SAMPLES
 
-    echo_delay_samples = int((ECHO_DELAY_MS / 1000.0) * SAMPLE_RATE)
-    indices_echo = (
-        np.arange(pointer_echo - echo_delay_samples, pointer_echo - echo_delay_samples + frames)
-        % MAX_DELAY_SAMPLES
-    )
-    echo_delayed = buffer_echo[indices_echo]
-    processed_input += echo_delayed * echo_amount
-    write_indices_echo = np.arange(pointer_echo, pointer_echo + frames) % MAX_DELAY_SAMPLES
-    buffer_echo[write_indices_echo] = processed_input + echo_delayed * (ECHO_FEEDBACK * echo_amount)
-    pointer_echo = (pointer_echo + frames) % MAX_DELAY_SAMPLES
+    if echo_amount > 0:
+        echo_delay_samples = int((ECHO_DELAY_MS / 1000.0) * SAMPLE_RATE)
+        indices_echo = (np.arange(pointer_echo - echo_delay_samples, pointer_echo - echo_delay_samples + frames) % MAX_DELAY_SAMPLES)
+        echo_delayed = buffer_echo[indices_echo]
+        processed_input += echo_delayed * echo_amount
+        write_indices_echo = np.arange(pointer_echo, pointer_echo + frames) % MAX_DELAY_SAMPLES
+        buffer_echo[write_indices_echo] = processed_input + echo_delayed * (ECHO_FEEDBACK * echo_amount)
+        pointer_echo = (pointer_echo + frames) % MAX_DELAY_SAMPLES
 
-    total_d1 = (-device2_offset_ms) + device1_delay_ms
-    delay1_samples = clamp(int((total_d1 / 1000.0) * SAMPLE_RATE), 0, MAX_DELAY_SAMPLES - 1)
-    write_indices_d1 = np.arange(pointer_device1, pointer_device1 + frames) % MAX_DELAY_SAMPLES
-    buffer_device1[write_indices_d1] = processed_input
-    read_indices_d1 = (write_indices_d1 - delay1_samples) % MAX_DELAY_SAMPLES
-    output_device1 = buffer_device1[read_indices_d1]
-    pointer_device1 = (pointer_device1 + frames) % MAX_DELAY_SAMPLES
-    total_d2 = (-device1_offset_ms) + device2_delay_ms
-    delay2_samples = clamp(int((total_d2 / 1000.0) * SAMPLE_RATE), 0, MAX_DELAY_SAMPLES - 1)
-    write_indices_d2 = np.arange(pointer_device2, pointer_device2 + frames) % MAX_DELAY_SAMPLES
-    buffer_device2[write_indices_d2] = processed_input
-    read_indices_d2 = (write_indices_d2 - delay2_samples) % MAX_DELAY_SAMPLES
-    output_device2 = buffer_device2[read_indices_d2]
-    pointer_device2 = (pointer_device2 + frames) % MAX_DELAY_SAMPLES
+    if device1_delay_ms > 0:
+        delay1_samples = clamp(int((device1_delay_ms / 1000.0) * SAMPLE_RATE), 0, MAX_DELAY_SAMPLES - 1)
+        write_indices_d1 = np.arange(pointer_device1, pointer_device1 + frames) % MAX_DELAY_SAMPLES
+        buffer_device1[write_indices_d1] = processed_input
+        read_indices_d1 = (write_indices_d1 - delay1_samples) % MAX_DELAY_SAMPLES
+        output_device1 = buffer_device1[read_indices_d1]
+        pointer_device1 = (pointer_device1 + frames) % MAX_DELAY_SAMPLES
+    else:
+        output_device1 = processed_input
+        write_indices_d1 = np.arange(pointer_device1, pointer_device1 + frames) % MAX_DELAY_SAMPLES
+        buffer_device1[write_indices_d1] = processed_input
+        pointer_device1 = (pointer_device1 + frames) % MAX_DELAY_SAMPLES
+
+    if device2_delay_ms > 0:
+        delay2_samples = clamp(int((device2_delay_ms / 1000.0) * SAMPLE_RATE), 0, MAX_DELAY_SAMPLES - 1)
+        write_indices_d2 = np.arange(pointer_device2, pointer_device2 + frames) % MAX_DELAY_SAMPLES
+        buffer_device2[write_indices_d2] = processed_input
+        read_indices_d2 = (write_indices_d2 - delay2_samples) % MAX_DELAY_SAMPLES
+        output_device2 = buffer_device2[read_indices_d2]
+        pointer_device2 = (pointer_device2 + frames) % MAX_DELAY_SAMPLES
+    else:
+        output_device2 = processed_input
+        write_indices_d2 = np.arange(pointer_device2, pointer_device2 + frames) % MAX_DELAY_SAMPLES
+        buffer_device2[write_indices_d2] = processed_input
+        pointer_device2 = (pointer_device2 + frames) % MAX_DELAY_SAMPLES
+
     try:
         queue_dev1.put_nowait(output_device1)
     except queue.Full:
@@ -227,25 +234,16 @@ def _sync_entry(entry, value, decimals=1):
 
 def update_parameters(*args):
     global reverb_amount, echo_amount, device1_delay_ms, device2_delay_ms
-    global device1_offset_ms, device2_offset_ms
-    for name in ('slider_reverb', 'slider_echo', 'slider_delay1', 'slider_delay2',
-                 'slider_offset1', 'slider_offset2',
-                 'entry_reverb', 'entry_echo', 'entry_delay1', 'entry_delay2',
-                 'entry_offset1', 'entry_offset2'):
-        if name not in globals():
-            return
+    for name in ('slider_reverb', 'slider_echo', 'slider_delay1', 'slider_delay2', 'entry_reverb', 'entry_echo', 'entry_delay1', 'entry_delay2'):
+        if name not in globals(): return
     reverb_amount = round(float(slider_reverb.get()), 1) / 100.0
     echo_amount = round(float(slider_echo.get()), 1) / 100.0
     device1_delay_ms = round(float(slider_delay1.get()), 1)
     device2_delay_ms = round(float(slider_delay2.get()), 1)
-    device1_offset_ms = round(float(slider_offset1.get()), 1)
-    device2_offset_ms = round(float(slider_offset2.get()), 1)
     _sync_entry(entry_reverb, reverb_amount * 100.0)
     _sync_entry(entry_echo, echo_amount * 100.0)
     _sync_entry(entry_delay1, device1_delay_ms)
     _sync_entry(entry_delay2, device2_delay_ms)
-    _sync_entry(entry_offset1, device1_offset_ms)
-    _sync_entry(entry_offset2, device2_offset_ms)
 
 def _on_entry_commit(entry, slider, lo, hi, decimals=1):
     try:
@@ -319,8 +317,6 @@ def save_preset_to_disk():
         "echo": float(slider_echo.get()),
         "delay1": float(slider_delay1.get()),
         "delay2": float(slider_delay2.get()),
-        "offset1": float(slider_offset1.get()),
-        "offset2": float(slider_offset2.get()),
         "autorun": bool(var_autorun.get()),
     }
     try:
@@ -359,10 +355,6 @@ def _apply_preset(data):
         set_slider(slider_delay1, entry_delay1, data["delay1"], 0, 100)
     if "delay2" in data:
         set_slider(slider_delay2, entry_delay2, data["delay2"], 0, 100)
-    if "offset1" in data:
-        set_slider(slider_offset1, entry_offset1, data["offset1"], -200, 0)
-    if "offset2" in data:
-        set_slider(slider_offset2, entry_offset2, data["offset2"], -200, 0)
     if "autorun" in data:
         var_autorun.set(bool(data["autorun"]))
     update_parameters()
@@ -509,8 +501,8 @@ pygame.mixer.pre_init(frequency=SAMPLE_RATE, size=-16, channels=2, buffer=512)
 pygame.mixer.init()
 
 root = tk.Tk()
-root.title("QuadroHaas Engine v1.2")
-root.geometry("480x720")
+root.title("QuadroHaas Engine v1.3")
+root.geometry("480x680")
 root.resizable(False, False)
 icon_path_full = resource_path(ICON_PATH)
 if os.path.isfile(icon_path_full):
@@ -550,29 +542,6 @@ combo_device1.pack(pady=5, padx=10)
 combo_device2 = ttk.Combobox(frame_devices, values=[], state="readonly", width=45)
 combo_device2.pack(pady=5, padx=10)
 
-frame_offsets = ttk.LabelFrame(tab_sound, text=" Device Delay Offset (ms) ")
-frame_offsets.pack(fill="x", padx=20, pady=5)
-row_o1 = ttk.Frame(frame_offsets)
-row_o1.pack(fill="x", padx=5, pady=3)
-ttk.Label(row_o1, text="Device 1 offset:", width=15).pack(side="left", padx=5)
-slider_offset1 = ttk.Scale(row_o1, from_=-200, to=0, orient="horizontal", command=update_parameters)
-slider_offset1.pack(side="left", fill="x", expand=True)
-slider_offset1.set(0)
-entry_offset1 = make_entry(row_o1, width=8)
-entry_offset1.pack(side="right", padx=5)
-entry_offset1.insert(0, "0.0")
-row_o2 = ttk.Frame(frame_offsets)
-row_o2.pack(fill="x", padx=5, pady=3)
-ttk.Label(row_o2, text="Device 2 offset:", width=15).pack(side="left", padx=5)
-slider_offset2 = ttk.Scale(row_o2, from_=-200, to=0, orient="horizontal", command=update_parameters)
-slider_offset2.pack(side="left", fill="x", expand=True)
-slider_offset2.set(0)
-entry_offset2 = make_entry(row_o2, width=8)
-entry_offset2.pack(side="right", padx=5)
-entry_offset2.insert(0, "0.0")
-bind_entry(entry_offset1, slider_offset1, -200, 0)
-bind_entry(entry_offset2, slider_offset2, -200, 0)
-
 if api_names:
     combo_api.current(0)
     if "MME" in api_names:
@@ -603,7 +572,10 @@ entry_echo = make_entry(frame_echo, width=8)
 entry_echo.pack(side="right", padx=5)
 entry_echo.insert(0, "0.0")
 bind_entry(entry_echo, slider_echo, 0, 50)
-frame_del1 = ttk.Frame(frame_effects)
+
+frame_device_delay = ttk.LabelFrame(tab_sound, text=" Device Delay (ms) ")
+frame_device_delay.pack(fill="x", padx=20, pady=5)
+frame_del1 = ttk.Frame(frame_device_delay)
 frame_del1.pack(fill="x", padx=5, pady=3)
 ttk.Label(frame_del1, text="Device 1 delay:", width=15).pack(side="left", padx=5)
 slider_delay1 = ttk.Scale(frame_del1, from_=0, to=100, orient="horizontal", command=update_parameters)
@@ -613,7 +585,7 @@ entry_delay1 = make_entry(frame_del1, width=8)
 entry_delay1.pack(side="right", padx=5)
 entry_delay1.insert(0, "0.0")
 bind_entry(entry_delay1, slider_delay1, 0, 100)
-frame_del2 = ttk.Frame(frame_effects)
+frame_del2 = ttk.Frame(frame_device_delay)
 frame_del2.pack(fill="x", padx=5, pady=3)
 ttk.Label(frame_del2, text="Device 2 delay:", width=15).pack(side="left", padx=5)
 slider_delay2 = ttk.Scale(frame_del2, from_=0, to=100, orient="horizontal", command=update_parameters)
